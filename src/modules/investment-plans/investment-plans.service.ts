@@ -77,7 +77,7 @@ export class InvestmentPlansService {
     if (status) filter.status = status;
 
     const skip = (page - 1) * limit;
-
+  
     const [data, total] = await Promise.all([
       this.planModel
         .find(filter)

@@ -13,7 +13,7 @@ import { DepositStatus, WalletStatus } from '../../common/enums/status.enum';
 import { TransactionType, TransactionStatus } from '../../common/enums/transaction-type.enum';
 import { MailService } from '../mail/mail.service';
 
-@Injectable()
+@Injectable()     
 export class DepositsService {
   constructor(
     @InjectModel(Deposit.name) private depositModel: Model<DepositDocument>,
@@ -57,39 +57,40 @@ export class DepositsService {
   }
 
   private async findAll(query: QueryDepositsDto, userId?: string) {
-    const { page = 1, limit = 10, status } = query;
-    const filter: Record<string, any> = {};
+  const { page = 1, limit = 10, status } = query;
+  const filter: Record<string, any> = {};
 
-    if (userId) {
-      // Explicit ObjectId cast — same fix applied to Withdrawals, Investments, and Transactions.
-      filter.user = new Types.ObjectId(userId);
-    }
-    if (status) filter.status = status;
-
-    const skip = (page - 1) * limit;
-    const [data, total] = await Promise.all([
-      this.depositModel
-        .find(filter)
-        .populate('wallet', 'coinName network walletAddress qrCodeImage status')
-        .skip(skip)
-        .limit(limit)
-        .sort({ createdAt: -1 }),
-      this.depositModel.countDocuments(filter),
-    ]);
-
-    return { data, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+  if (userId) {
+    filter.user = new Types.ObjectId(userId);
   }
+  if (status) filter.status = status;
+
+  const skip = (page - 1) * limit;
+  const [data, total] = await Promise.all([
+    this.depositModel
+      .find(filter)
+      .populate('user', 'fullName email balance')
+      .populate('wallet', 'coinName network walletAddress qrCodeImage status')
+      .skip(skip)
+      .limit(limit)
+      .sort({ createdAt: -1 }),
+    this.depositModel.countDocuments(filter),
+  ]);
+
+  return { data, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+}
 
   async findOne(userId: string, id: string, isAdmin = false) {
-    const deposit = await this.depositModel
-      .findById(id)
-      .populate('wallet', 'coinName network walletAddress qrCodeImage status');
-    if (!deposit) throw new NotFoundException('Deposit not found');
-    if (!isAdmin && deposit.user.toString() !== userId) {
-      throw new ForbiddenException('You do not have access to this deposit');
-    }
-    return deposit;
+  const deposit = await this.depositModel
+    .findById(id)
+    .populate('user', 'fullName email balance')
+    .populate('wallet', 'coinName network walletAddress qrCodeImage status');
+  if (!deposit) throw new NotFoundException('Deposit not found');
+  if (!isAdmin && deposit.user.toString() !== userId) {
+    throw new ForbiddenException('You do not have access to this deposit');
   }
+  return deposit;
+}     
 
   async approve(id: string, adminId: string) {
     const deposit = await this.depositModel.findById(id);

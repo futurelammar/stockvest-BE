@@ -133,7 +133,7 @@ export class InvestmentsService {
     }
     return investment;
   }
-
+     
   // ---------- Admin: pause / resume ----------
 
   async pause(id: string) {

@@ -80,9 +80,14 @@ export class WithdrawalsService {
     if (status) filter.status = status;
     const skip = (page - 1) * limit;
     const [data, total] = await Promise.all([
-      this.withdrawalModel.find(filter).skip(skip).limit(limit).sort({ createdAt: -1 }),
-      this.withdrawalModel.countDocuments(filter),
-    ]);
+  this.withdrawalModel
+    .find(filter)
+    .populate('user', 'fullName email balance')
+    .skip(skip)
+    .limit(limit)
+    .sort({ createdAt: -1 }),
+  this.withdrawalModel.countDocuments(filter),
+]);
 
     return { data, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } };
   }

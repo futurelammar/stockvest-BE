@@ -5,26 +5,26 @@ import { AppModule } from '../../app.module';
 import { Stock, StockDocument } from '../../modules/stocks/schemas/stock.schema';
 
 const REAL_STOCKS = [
-  { name: 'Apple Inc.', ticker: 'AAPL', sector: 'Technology' },
-  { name: 'Alphabet Inc. (Google)', ticker: 'GOOGL', sector: 'Technology' },
-  { name: 'Microsoft Corporation', ticker: 'MSFT', sector: 'Technology' },
-  { name: 'Amazon.com, Inc.', ticker: 'AMZN', sector: 'Consumer Discretionary' },
-  { name: 'Tesla, Inc.', ticker: 'TSLA', sector: 'Automotive' },
-  { name: 'Meta Platforms, Inc.', ticker: 'META', sector: 'Technology' },
-  { name: 'NVIDIA Corporation', ticker: 'NVDA', sector: 'Technology' },
-  { name: 'Netflix, Inc.', ticker: 'NFLX', sector: 'Media' },
-  { name: 'JPMorgan Chase & Co.', ticker: 'JPM', sector: 'Financials' },
-  { name: 'Visa Inc.', ticker: 'V', sector: 'Financials' },
-  { name: 'Walmart Inc.', ticker: 'WMT', sector: 'Retail' },
-  { name: 'The Walt Disney Company', ticker: 'DIS', sector: 'Media' },
-  { name: 'The Coca-Cola Company', ticker: 'KO', sector: 'Consumer Staples' },
-  { name: 'PepsiCo, Inc.', ticker: 'PEP', sector: 'Consumer Staples' },
-  { name: 'Boeing Company', ticker: 'BA', sector: 'Industrials' },
-  { name: 'Intel Corporation', ticker: 'INTC', sector: 'Technology' },
-  { name: 'Advanced Micro Devices, Inc.', ticker: 'AMD', sector: 'Technology' },
-  { name: 'PayPal Holdings, Inc.', ticker: 'PYPL', sector: 'Financials' },
-  { name: 'Adobe Inc.', ticker: 'ADBE', sector: 'Technology' },
-  { name: 'Oracle Corporation', ticker: 'ORCL', sector: 'Technology' },
+  { name: 'Tesla, Inc.',                      ticker: 'TSLA', sector: 'Automotive' },
+  { name: 'Ford Motor Company',               ticker: 'F',    sector: 'Automotive' },
+  { name: 'General Motors Company',           ticker: 'GM',   sector: 'Automotive' },
+  { name: 'Ferrari N.V.',                     ticker: 'RACE', sector: 'Automotive' },
+  { name: 'Toyota Motor Corporation',         ticker: 'TM',   sector: 'Automotive' },
+  { name: 'Rivian Automotive, Inc.',          ticker: 'RIVN', sector: 'Automotive' },
+  { name: 'Lucid Group, Inc.',                ticker: 'LCID', sector: 'Automotive' },
+  { name: 'Stellantis N.V.',                  ticker: 'STLA', sector: 'Automotive' },
+  { name: 'Honda Motor Co., Ltd.',            ticker: 'HMC',  sector: 'Automotive' },
+  { name: 'Nio Inc.',                         ticker: 'NIO',  sector: 'Automotive' },
+  { name: 'Li Auto Inc.',                     ticker: 'LI',   sector: 'Automotive' },
+  { name: 'XPeng Inc.',                       ticker: 'XPEV', sector: 'Automotive' },
+  { name: 'Volkswagen AG',                    ticker: 'VWAGY',sector: 'Automotive' },
+  { name: 'BYD Company Limited',              ticker: 'BYDDY',sector: 'Automotive' },
+  { name: 'Aptiv PLC',                        ticker: 'APTV', sector: 'Automotive' },
+  { name: 'Magna International Inc.',         ticker: 'MGA',  sector: 'Automotive' },
+  { name: 'BorgWarner Inc.',                  ticker: 'BWA',  sector: 'Automotive' },
+  { name: 'Gentex Corporation',               ticker: 'GNTX', sector: 'Automotive' },
+  { name: 'Dorman Products, Inc.',            ticker: 'DORM', sector: 'Automotive' },
+  { name: 'Modine Manufacturing Company',     ticker: 'MOD',  sector: 'Automotive' },
 ];
 
 async function seedStocks() {
@@ -36,16 +36,13 @@ async function seedStocks() {
 
   for (const stock of REAL_STOCKS) {
     const existing = await stockModel.findOne({ ticker: stock.ticker });
-    if (existing) {
-      skipped++;
-      continue;
-    }
+    if (existing) { skipped++; continue; }
     await stockModel.create({ ...stock, isCustom: false, currentPrice: 0, previousClose: 0 });
     created++;
   }
 
   console.log(`✅ Seed complete — ${created} stock(s) created, ${skipped} already existed.`);
-  console.log('Prices populate on the next cron tick (every 15 min), or trigger one manually if needed.');
+  console.log('Prices populate on the next cron tick (every 15 min).');
   await app.close();
   process.exit(0);
 }

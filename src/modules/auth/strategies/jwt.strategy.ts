@@ -18,16 +18,17 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     @InjectModel(User.name) private userModel: Model<UserDocument>,
   ) {
     super({
-      jwtFromRequest: ExtractJwt.fromExtractors([cookieExtractor, ExtractJwt.fromAuthHeaderAsBearerToken()]),
+      // Bearer header now checked FIRST. An explicit Authorization header is
+      // a deliberate signal from the client (e.g. the admin panel) — it should
+      // always win over an ambient cookie that might just be leftover from a
+      // different session (e.g. a regular user logged in earlier in the same browser).
+      jwtFromRequest: ExtractJwt.fromExtractors([ExtractJwt.fromAuthHeaderAsBearerToken(), cookieExtractor]),
       ignoreExpiration: false,
       secretOrKey: configService.getOrThrow<string>('JWT_SECRET'),
     });
   }
 
   async validate(payload: { sub: string; email: string; role: string }) {
-    // One extra DB read per authenticated request — totally fine at this scale,
-    // and means a blocked/deleted user's existing token stops working immediately
-    // instead of staying valid until it naturally expires.
     const user = await this.userModel.findById(payload.sub);
     if (!user) throw new UnauthorizedException('Account no longer exists');
     if (!user.isActive) throw new UnauthorizedException('This account has been suspended');
