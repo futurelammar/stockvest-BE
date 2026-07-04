@@ -37,12 +37,16 @@ export class AuthController {
     return { user: result.user };
   }
 
-  @Post('logout')
-  @ApiOperation({ summary: 'Clear the auth cookie' })
-  logout(@Res({ passthrough: true }) res: Response) {
-    res.clearCookie('access_token', { path: '/' });
-    return { message: 'Logged out' };
-  }
+@Post('logout')
+logout(@Res({ passthrough: true }) res: Response) {
+  const isProd = process.env.NODE_ENV === 'production';
+  res.clearCookie('access_token', {
+    path: '/',
+    secure: isProd,
+    sameSite: isProd ? 'none' : 'lax',
+  });
+  return { message: 'Logged out' };
+}
 
   @Post('verify-email')
   @ApiOperation({ summary: 'Verify email using token sent to user inbox' })
@@ -73,11 +77,12 @@ export class AuthController {
   private setAuthCookie(res: Response, token: string) {
   const expiresIn = this.configService.get<string>('JWT_EXPIRES_IN') || '1d';
   const maxAge = ms(expiresIn as ms.StringValue);
+  const isProd = process.env.NODE_ENV === 'production';
 
   res.cookie('access_token', token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    secure: isProd,                       // must be true whenever sameSite is 'none'
+    sameSite: isProd ? 'none' : 'lax',    // 'none' required for cross-site in prod
     maxAge: maxAge ?? ms('1d'),
     path: '/',
   });
