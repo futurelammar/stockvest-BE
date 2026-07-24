@@ -18,26 +18,44 @@ export class StockPriceProviderService {
     this.apiKey = this.configService.getOrThrow<string>('FINNHUB_API_KEY');
   }
 
-  async getQuote(ticker: string): Promise<StockQuote | null> {
+  async getQuote(ticker: string, retries = 1): Promise<StockQuote | null> {
     try {
       const { data } = await axios.get(`${this.baseUrl}/quote`, {
         params: { symbol: ticker, token: this.apiKey },
         timeout: 8000,
       });
 
-      // Finnhub returns all zeros for an unknown/invalid ticker instead of an HTTP error
       if (!data || data.c === 0) {
-        this.logger.warn(`No quote data returned for ${ticker}`);
+        this.logger.warn(`No quote data returned for ${ticker} — may be an invalid ticker`);
         return null;
       }
 
       const price = data.c;
       const previousClose = data.pc;
-      const changePercent = previousClose ? ((price - previousClose) / previousClose) * 100 : 0;
+      const changePercent = previousClose
+        ? ((price - previousClose) / previousClose) * 100
+        : 0;
 
-      return { price, previousClose, changePercent: Math.round(changePercent * 100) / 100 };
-    } catch (error) {
-      this.logger.error(`Failed to fetch quote for ${ticker}: ${error.message}`);
+      return {
+        price,
+        previousClose,
+        changePercent: Math.round(changePercent * 100) / 100,
+      };
+    } catch (error: any) {
+      const status = error?.response?.status;
+
+      if (status === 429 && retries > 0) {
+        // Rate limited — wait 65 seconds and try once more
+        this.logger.warn(
+          `Rate limited (429) on ${ticker} — waiting 65s then retrying once`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 65000));
+        return this.getQuote(ticker, retries - 1);
+      }
+
+      this.logger.error(
+        `Failed to fetch quote for ${ticker}: ${error.message}`,
+      );
       return null;
     }
   }

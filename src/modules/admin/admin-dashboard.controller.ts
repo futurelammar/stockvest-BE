@@ -25,4 +25,4 @@ export class AdminDashboardController {
   getRecentActivity(@Query('limit') limit?: number) {
     return this.dashboardService.getRecentActivity(limit ? Number(limit) : 10);
   }
-}
+}      

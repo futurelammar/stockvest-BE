@@ -14,6 +14,7 @@ import { CloudinaryService } from '../../uploads/cloudinary/cloudinary.service';
 import { MailService } from '../mail/mail.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { TransactionType, TransactionStatus } from '../../common/enums/transaction-type.enum';
+import { Role } from 'src/common/enums/role.enum';
 
 @Injectable()
 export class UsersService {
@@ -63,29 +64,31 @@ export class UsersService {
 
   // ---------- Admin: listing ----------
 
-  async findAll(query: QueryUsersDto) {
-    const { page = 1, limit = 10, search, role, isActive } = query;
-    const filter: Record<string, any> = {};
+ async findAll(query: QueryUsersDto) {
+  const { page = 1, limit = 10, search, isActive } = query;
 
-    if (search) {
-      filter.$or = [
-        { fullName: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-      ];
-    }
-    if (role) filter.role = role;
-    if (typeof isActive === 'boolean') filter.isActive = isActive;
+  // Always scope to regular users only — admins are never visible
+  // in the user management list regardless of other filters
+  const filter: Record<string, any> = { role: Role.USER };
 
-    const skip = (page - 1) * limit;
-
-    const [data, total] = await Promise.all([
-      this.userModel.find(filter).skip(skip).limit(limit).sort({ createdAt: -1 }),
-      this.userModel.countDocuments(filter),
-    ]);
-
-    return { data, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+  if (search) {
+    filter.$or = [
+      { fullName: { $regex: search, $options: 'i' } },
+      { email: { $regex: search, $options: 'i' } },
+    ];
   }
+  if (typeof isActive === 'boolean') filter.isActive = isActive;
 
+  const skip = (page - 1) * limit;
+
+  const [data, total] = await Promise.all([
+    this.userModel.find(filter).skip(skip).limit(limit).sort({ createdAt: -1 }),
+    this.userModel.countDocuments(filter),
+  ]);
+
+  return { data, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+}
+     
   async findOne(id: string) {
     const user = await this.userModel.findById(id);
     if (!user) throw new NotFoundException('User not found');
@@ -105,6 +108,21 @@ export class UsersService {
     if (!user) throw new NotFoundException('User not found');
     return user;
   }
+
+
+  async deleteUser(id: string) {
+  const user = await this.userModel.findById(id);
+  if (!user) throw new NotFoundException('User not found');
+
+  // Prevent deleting admin accounts through this endpoint —
+  // admins can only be removed directly from the database
+  if (user.role === Role.ADMIN) {
+    throw new BadRequestException('Admin accounts cannot be deleted through this endpoint');
+  }
+
+  await this.userModel.findByIdAndDelete(id);
+  return { message: 'User deleted permanently' };
+}
 
   // ---------- Admin: block / unblock account ----------
 

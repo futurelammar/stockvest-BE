@@ -23,10 +23,6 @@ export class QueryUsersDto {
   @IsString()
   search?: string;
 
-  @ApiPropertyOptional({ enum: Role })
-  @IsOptional()
-  @IsEnum(Role)
-  role?: Role;
 
   @ApiPropertyOptional({ example: true })
   @IsOptional()

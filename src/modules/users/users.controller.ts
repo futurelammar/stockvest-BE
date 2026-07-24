@@ -107,6 +107,15 @@ export class UsersController {
     return this.usersService.deactivateUser(id);
   }
 
+    @Delete('admin/:id/delete')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: '[Admin] Permanently delete a user and all their data' })
+  deleteUser(@Param('id') id: string) {
+    return this.usersService.deleteUser(id);
+  }
+
+  
   @Patch('admin/:id/block')
   @UseGuards(RolesGuard)
   @Roles(Role.ADMIN)
