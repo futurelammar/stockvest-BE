@@ -112,7 +112,7 @@ export class UsersService {
 
   async deleteUser(id: string) {
   const user = await this.userModel.findById(id);
-  if (!user) throw new NotFoundException('User not found');
+  if (!user) throw new NotFoundException('User not found');      
 
   // Prevent deleting admin accounts through this endpoint —
   // admins can only be removed directly from the database
