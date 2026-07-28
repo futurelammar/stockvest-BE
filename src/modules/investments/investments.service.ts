@@ -251,7 +251,7 @@ export class InvestmentsService {
       throw new BadRequestException('Maturity date must be after the start date');
     }
 
-    await investment.save();
+    await investment.save();    
     return investment;
   }
 }

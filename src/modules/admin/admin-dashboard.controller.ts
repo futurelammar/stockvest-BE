@@ -9,7 +9,7 @@ import { Role } from '../../common/enums/role.enum';
 @ApiTags('Admin Dashboard')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.ADMIN)
+@Roles(Role.ADMIN)   
 @Controller('admin/dashboard')
 export class AdminDashboardController {
   constructor(private dashboardService: AdminDashboardService) {}
