@@ -32,6 +32,8 @@ export class Deposit {
 
   @Prop({ type: Types.ObjectId, ref: 'User' })
   reviewedBy?: Types.ObjectId;
+
+  createdAt?: Date;
 }
 
 export const DepositSchema = SchemaFactory.createForClass(Deposit);

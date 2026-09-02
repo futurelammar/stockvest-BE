@@ -21,8 +21,17 @@ export class Transaction {
   @Prop({ required: true, unique: true })
   reference: string;
 
+  @Prop({ type: Types.ObjectId, refPath: 'sourceModel' })
+    sourceId?: Types.ObjectId;
+  
+  @Prop({ type: String, enum: ['Deposit', 'Investment', 'Withdrawal'] })
+    sourceModel?: string;
+
   @Prop()
   description?: string;
+
+  createdAt?: Date;
+  updatedAt?: Date;
 
   @Prop({ type: Object })
   metadata?: Record<string, any>;

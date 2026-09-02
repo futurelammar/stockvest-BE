@@ -9,6 +9,8 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Role } from '../../common/enums/role.enum';
+import { AdminCreateInvestmentDto } from './dto/admin-create-investment.dto';
+import { CreditProfitDto } from './dto/credit-profit.dto';
 
 @ApiTags('Investments')
 @ApiBearerAuth()
@@ -28,13 +30,13 @@ export class InvestmentsController {
   findMine(@CurrentUser('userId') userId: string, @Query() query: QueryInvestmentsDto) {
     return this.investmentsService.findMyInvestments(userId, query);
   }
-
+  
   @Get('me/:id')
   @ApiOperation({ summary: 'Get one of my investments' })
   findMineOne(@CurrentUser('userId') userId: string, @Param('id') id: string) {
     return this.investmentsService.findOne(userId, id);
   }
-
+  
   @Get('admin/all')
   @UseGuards(RolesGuard)
   @Roles(Role.ADMIN)
@@ -42,6 +44,8 @@ export class InvestmentsController {
   findAllAdmin(@Query() query: QueryInvestmentsDto) {
     return this.investmentsService.findAllAdmin(query);
   }
+
+
 
   @Get('admin/:id')
   @UseGuards(RolesGuard)
@@ -74,6 +78,23 @@ export class InvestmentsController {
   cancel(@Param('id') id: string) {
     return this.investmentsService.cancel(id);
   }
+
+
+@Post('admin/create')
+@UseGuards(RolesGuard)
+@Roles(Role.ADMIN)
+@ApiOperation({ summary: '[Admin] Create an investment on behalf of a user' })
+adminCreate(@CurrentUser('userId') adminId: string, @Body() dto: AdminCreateInvestmentDto) {
+  return this.investmentsService.adminCreate(adminId, dto);
+}
+
+@Patch('admin/:id/credit-profit')
+@UseGuards(RolesGuard)
+@Roles(Role.ADMIN)
+@ApiOperation({ summary: '[Admin] Credit profit for a specific investment' })
+creditProfit(@Param('id') id: string, @Body() dto: CreditProfitDto) {
+  return this.investmentsService.creditProfit(id, dto);
+}
 
   @Patch('admin/:id/adjust-dates')
   @UseGuards(RolesGuard)

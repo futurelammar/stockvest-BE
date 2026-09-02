@@ -18,6 +18,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Role } from '../../common/enums/role.enum';
+import { EditDepositDto } from './dto/edit-deposit.dto';
 
 @ApiTags('Deposits')
 @ApiBearerAuth()
@@ -75,4 +76,12 @@ export class DepositsController {
   reject(@CurrentUser('userId') adminId: string, @Param('id') id: string, @Body() dto: ReviewDepositDto) {
     return this.depositsService.reject(id, adminId, dto);
   }
+
+@Patch('admin/:id/edit')
+@UseGuards(RolesGuard)
+@Roles(Role.ADMIN)
+@ApiOperation({ summary: '[Admin] Edit a deposit — amount, coin, network, or backdate/frontdate the createdAt date' })
+edit(@Param('id') id: string, @Body() dto: EditDepositDto) {
+  return this.depositsService.edit(id, dto);
+}
 }
