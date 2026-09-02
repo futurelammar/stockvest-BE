@@ -9,6 +9,7 @@ import { Model, Types } from 'mongoose';
 import { randomUUID } from 'crypto';
 import { Investment, InvestmentDocument } from './schemas/investment.schema';
 import { User, UserDocument } from '../users/schemas/user.schema';
+
 import { Transaction, TransactionDocument } from '../transactions/schemas/transaction.schema';
 import { CreateInvestmentDto } from './dto/create-investment.dto';
 import { QueryInvestmentsDto } from './dto/query-investments.dto';
@@ -18,6 +19,9 @@ import { MailService } from '../mail/mail.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { InvestmentStatus, PlanStatus } from '../../common/enums/status.enum';
 import { TransactionType, TransactionStatus } from '../../common/enums/transaction-type.enum';
+import { AdminCreateInvestmentDto } from './dto/admin-create-investment.dto';
+import { CreditProfitDto } from './dto/credit-profit.dto';
+import { Cron, CronExpression } from '@nestjs/schedule';
 
 @Injectable()
 export class InvestmentsService {
@@ -88,51 +92,46 @@ export class InvestmentsService {
     return this.findAll(query);
   }
 
-  private async findAll(query: QueryInvestmentsDto, userId?: string) {
-    const { page = 1, limit = 10, status } = query;
-    const filter: Record<string, any> = {};
-    if (userId) {
-      // Explicit ObjectId cast here is the key fix.
-      // Mongoose *should* auto-cast a string when the schema declares
-      // `type: Types.ObjectId`, but if any stored documents have the user
-      // field saved as a plain string (from earlier writes), this cast
-      // ensures the *query* side is always a proper ObjectId — and then
-      // the migration script below fixes the *stored* side.
-      filter.user = new Types.ObjectId(userId);
-    }
-
-    if (status) filter.status = status;
-
-    const skip = (page - 1) * limit;
-    const [data, total] = await Promise.all([
-      this.investmentModel
-        .find(filter)
-        .populate({
-          path: 'plan',
-          select: 'planName roiPercentage durationInDays stock',
-          populate: { path: 'stock', select: 'name ticker logoUrl currentPrice changePercent' },
-        })
-        .skip(skip)
-        .limit(limit)
-        .sort({ createdAt: -1 }),
-      this.investmentModel.countDocuments(filter),
-    ]);
-
-    return { data, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+private async findAll(query: QueryInvestmentsDto, userId?: string) {
+  const { page = 1, limit = 10, status } = query;
+  const filter: Record<string, any> = {};
+  if (userId) {
+    filter.user = new Types.ObjectId(userId);
   }
+  if (status) filter.status = status;
 
+  const skip = (page - 1) * limit;
+  const [data, total] = await Promise.all([
+    this.investmentModel
+      .find(filter)
+      .populate('user', 'fullName email')
+      .populate({
+        path: 'plan',
+        select: 'planName roiPercentage durationInDays stock',
+        populate: { path: 'stock', select: 'name ticker logoUrl currentPrice changePercent' },
+      })
+      .skip(skip)
+      .limit(limit)
+      .sort({ createdAt: -1 }),
+    this.investmentModel.countDocuments(filter),
+  ]);
+
+  return { data, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+}
   async findOne(userId: string, id: string, isAdmin = false) {
-    const investment = await this.investmentModel.findById(id).populate({
+  const investment = await this.investmentModel.findById(id)
+    .populate('user', 'fullName email')
+    .populate({
       path: 'plan',
       select: 'planName roiPercentage durationInDays stock',
       populate: { path: 'stock', select: 'name ticker logoUrl currentPrice changePercent' },
     });
-    if (!investment) throw new NotFoundException('Investment not found');
-    if (!isAdmin && investment.user.toString() !== userId) {
-      throw new ForbiddenException('You do not have access to this investment');
-    }
-    return investment;
+  if (!investment) throw new NotFoundException('Investment not found');
+  if (!isAdmin && (investment.user as any)._id.toString() !== userId) {
+    throw new ForbiddenException('You do not have access to this investment');
   }
+  return investment;
+}
      
   // ---------- Admin: pause / resume ----------
 
@@ -254,4 +253,146 @@ export class InvestmentsService {
     await investment.save();    
     return investment;
   }
+
+
+
+ // ---------- Admin: create an investment on behalf of a user ----------
+
+async adminCreate(adminId: string, dto: AdminCreateInvestmentDto) {
+  const plan = await this.plansService.findOne(dto.planId);
+  const user = await this.userModel.findById(dto.userId);
+  if (!user) throw new NotFoundException('User not found');
+
+  const deduct = dto.deductFromBalance ?? true;
+  if (deduct && user.balance < dto.amount) {
+    throw new BadRequestException('User has insufficient balance for this investment');
+  }
+
+  const startDate = dto.startDate ? new Date(dto.startDate) : new Date();
+  const maturityDate = new Date(startDate.getTime() + plan.durationInDays * 24 * 60 * 60 * 1000);
+  const expectedProfit = Math.round(((dto.amount * plan.roiPercentage) / 100) * 100) / 100;
+
+  if (deduct) {
+    user.balance -= dto.amount;
+    user.totalInvested += dto.amount;
+    await user.save();
+  }
+
+  const investment = await this.investmentModel.create({
+    user: user._id,
+    plan: plan._id,
+    amountInvested: dto.amount,
+    roiPercentage: plan.roiPercentage,
+    durationInDays: plan.durationInDays,
+    startDate,
+    maturityDate,
+    status: InvestmentStatus.ACTIVE,
+    expectedProfit,
+  });
+
+  await this.notificationsService.create(
+    user._id.toString(),
+    'Investment Created',
+    `An investment of $${dto.amount.toLocaleString()} in ${plan.planName} was set up for you.`,
+    'investment',
+  );
+
+  return investment;
+}
+
+// ---------- Admin: credit profit for a specific investment ----------
+
+async creditProfit(investmentId: string, dto: CreditProfitDto) {
+  const investment = await this.investmentModel.findById(investmentId).populate('plan', 'planName');
+  if (!investment) throw new NotFoundException('Investment not found');
+  if (investment.profitCredited) {
+    throw new BadRequestException('Profit has already been credited for this investment');
+  }
+
+  const user = await this.userModel.findById(investment.user);
+  if (!user) throw new NotFoundException('User not found');
+
+  user.balance += dto.amount;
+  user.totalProfit += dto.amount;
+  await user.save();
+
+  const planName = (investment.plan as any)?.planName ?? 'your investment';
+
+  const transaction = await this.transactionModel.create({
+    user: user._id,
+    type: TransactionType.PROFIT,
+    amount: dto.amount,
+    status: TransactionStatus.COMPLETED,
+    reference: `PROFIT-${randomUUID()}`,
+    description: dto.reason,
+    sourceId: investment._id,
+    sourceModel: 'Investment',
+    createdAt: investment.maturityDate, // transaction carries the investment's finish date
+  });
+
+  investment.profitCredited = true;
+  investment.status = InvestmentStatus.COMPLETED;
+  await investment.save();
+
+  await this.notificationsService.create(
+    user._id.toString(),
+    'Profit Credited',
+    `$${dto.amount.toLocaleString()} profit from ${planName} was credited to your balance. ${dto.reason}`,
+    'investment',
+  );
+
+  return { investment, transaction };
+}
+
+@Cron(CronExpression.EVERY_HOUR)
+async processMaturedInvestments() {
+  const dueInvestments = await this.investmentModel.find({
+    status: InvestmentStatus.ACTIVE,
+    profitCredited: false,
+    maturityDate: { $lte: new Date() },
+  });
+
+  for (const investment of dueInvestments) {
+    try {
+      const user = await this.userModel.findById(investment.user);
+      if (!user) continue;
+
+      user.balance += investment.expectedProfit;
+      user.totalProfit += investment.expectedProfit;
+      await user.save();
+
+      await this.transactionModel.create({
+        user: user._id,
+        type: TransactionType.PROFIT,
+        amount: investment.expectedProfit,
+        status: TransactionStatus.COMPLETED,
+        reference: `PROFIT-${randomUUID()}`,
+        description: `Investment matured — profit credited automatically`,
+        sourceId: investment._id,
+        sourceModel: 'Investment',
+        createdAt: investment.maturityDate, // transaction is dated to the maturity date, not "now"
+      });
+
+      investment.profitCredited = true;
+      investment.status = InvestmentStatus.COMPLETED;
+      await investment.save();
+
+      await this.notificationsService.create(
+        user._id.toString(),
+        'Investment Matured',
+        `Your investment matured and $${investment.expectedProfit.toLocaleString()} profit has been credited to your balance.`,
+        'investment',
+      );
+    } catch (err) {
+      console.error(`[processMaturedInvestments] failed for investment ${investment._id}:`, err);
+      // continue processing the rest even if one fails
+    }
+  }
+
+  if (dueInvestments.length > 0) {
+    console.log(`[processMaturedInvestments] processed ${dueInvestments.length} matured investment(s)`);
+  }
+}
+
+
 }
