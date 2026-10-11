@@ -2,12 +2,16 @@ import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/commo
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Transaction, TransactionDocument } from './schemas/transaction.schema';
+import { User, UserDocument } from '../users/schemas/user.schema';
 import { QueryTransactionsDto } from './dto/query-transactions.dto';
 
 @Injectable()
 export class TransactionsService {
   constructor(
     @InjectModel(Transaction.name) private transactionModel: Model<TransactionDocument>,
+    // Inject User so getSummary can read the denormalised running totals
+    // that InvestmentsService keeps on the user document.
+    @InjectModel(User.name) private userModel: Model<UserDocument>,
   ) {}
 
   async findMine(userId: string, query: QueryTransactionsDto) {
@@ -23,9 +27,6 @@ export class TransactionsService {
     const filter: Record<string, any> = {};
 
     if (userId) {
-      // Explicit ObjectId cast — same fix applied to Withdrawals and Investments.
-      // Ensures the query side always matches regardless of how the user field
-      // was originally stored on any given document.
       filter.user = new Types.ObjectId(userId);
     }
     if (type) filter.type = type;
@@ -54,23 +55,62 @@ export class TransactionsService {
     return transaction;
   }
 
-  // Quick wallet summary for dashboard — total in vs total out
+  /**
+   * Dashboard wallet summary.
+   *
+   * WHY the old approach was wrong:
+   * ─────────────────────────────────
+   * The original code called sumByType(userId, 'investment') and
+   * sumByType(userId, 'profit'), expecting Transaction documents of those
+   * types to exist. But InvestmentsService.create() never writes an
+   * 'investment' transaction — it deducts balance and increments
+   * user.totalInvested directly on the User document.
+   *
+   * So the aggregate always returned 0 for totalInvested.
+   *
+   * FIX:
+   * ────
+   * • totalDeposited  → aggregate completed 'deposit' transactions  ✓ (correct source)
+   * • totalWithdrawn  → aggregate completed 'withdrawal' transactions ✓ (correct source)
+   * • totalInvested   → read user.totalInvested (maintained by InvestmentsService) ✓
+   * • totalProfit     → read user.totalProfit   (maintained by InvestmentsService) ✓
+   */
   async getSummary(userId: string) {
-    const [deposits, withdrawals, investments, profits] = await Promise.all([
-      this.sumByType(userId, 'deposit'),
-      this.sumByType(userId, 'withdrawal'),
-      this.sumByType(userId, 'investment'),
-      this.sumByType(userId, 'profit'),
+    const [depositsResult, withdrawalsResult, user] = await Promise.all([
+      // Deposits: real transaction records exist for these
+      this.transactionModel.aggregate([
+        {
+          $match: {
+            user: new Types.ObjectId(userId),
+            type: 'deposit',
+            status: 'completed',
+          },
+        },
+        { $group: { _id: null, total: { $sum: '$amount' } } },
+      ]),
+
+      // Withdrawals: real transaction records exist for these
+      this.transactionModel.aggregate([
+        {
+          $match: {
+            user: new Types.ObjectId(userId),
+            type: 'withdrawal',
+            status: 'completed',
+          },
+        },
+        { $group: { _id: null, total: { $sum: '$amount' } } },
+      ]),
+
+      // User document carries the running totals for invested & profit
+      // because InvestmentsService updates them directly on save().
+      this.userModel.findById(userId).select('totalInvested totalProfit').lean(),
     ]);
 
-    return { totalDeposited: deposits, totalWithdrawn: withdrawals, totalInvested: investments, totalProfit: profits };
-  }
-
-  private async sumByType(userId: string, type: string) {
-    const result = await this.transactionModel.aggregate([
-      { $match: { user: new Types.ObjectId(userId), type, status: 'completed' } },
-      { $group: { _id: null, total: { $sum: '$amount' } } },
-    ]);
-    return result[0]?.total || 0;
+    return {
+      totalDeposited: depositsResult[0]?.total ?? 0,
+      totalWithdrawn: withdrawalsResult[0]?.total ?? 0,
+      totalInvested:  user?.totalInvested ?? 0,
+      totalProfit:    user?.totalProfit   ?? 0,
+    };
   }
 }

@@ -17,7 +17,7 @@ async function bootstrap() {
   app.use(cookieParser());
 
   app.enableCors({
-    origin: configService.get<string>('FRONTEND_URL') || 'http://localhost:3000',
+    origin: configService.get<string>('FRONTEND_URL') || 'https://psychic-winner-gxx47454r4v93p4qx-3000.app.github.dev',
     credentials: true,
   });
 
