@@ -27,6 +27,13 @@ export class User {
   balance: number;
 
   @Prop({ default: 0 })
+  depositedAdjustment: number;
+ 
+  @Prop({ default: 0 })
+  withdrawnAdjustment: number;
+ 
+
+  @Prop({ default: 0 })
   totalInvested: number;
 
   @Prop({ default: 0 })

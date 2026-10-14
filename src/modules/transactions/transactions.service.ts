@@ -1,12 +1,15 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Transaction, TransactionDocument } from './schemas/transaction.schema';
 import { User, UserDocument } from '../users/schemas/user.schema';
 import { QueryTransactionsDto } from './dto/query-transactions.dto';
+import { UpdateUserTotalsDto } from './dto/update-user-totals.dto';
 
 @Injectable()
 export class TransactionsService {
+  private readonly logger = new Logger(TransactionsService.name);
+
   constructor(
     @InjectModel(Transaction.name) private transactionModel: Model<TransactionDocument>,
     // Inject User so getSummary can read the denormalised running totals
@@ -55,62 +58,87 @@ export class TransactionsService {
     return transaction;
   }
 
+  /** Sum of completed transactions of one type for one user (the "real" figure). */
+  private async sumCompleted(userId: string, type: 'deposit' | 'withdrawal'): Promise<number> {
+    const result = await this.transactionModel.aggregate([
+      {
+        $match: {
+          user: new Types.ObjectId(userId),
+          type,
+          status: 'completed',
+        },
+      },
+      { $group: { _id: null, total: { $sum: '$amount' } } },
+    ]);
+    return result[0]?.total ?? 0;
+  }
+
   /**
    * Dashboard wallet summary.
    *
-   * WHY the old approach was wrong:
-   * ─────────────────────────────────
-   * The original code called sumByType(userId, 'investment') and
-   * sumByType(userId, 'profit'), expecting Transaction documents of those
-   * types to exist. But InvestmentsService.create() never writes an
-   * 'investment' transaction — it deducts balance and increments
-   * user.totalInvested directly on the User document.
+   * • totalDeposited  → completed 'deposit' transactions + admin adjustment
+   * • totalWithdrawn  → completed 'withdrawal' transactions + admin adjustment
+   * • totalInvested   → user.totalInvested (maintained by InvestmentsService, admin-editable)
+   * • totalProfit     → user.totalProfit   (maintained by InvestmentsService, admin-editable)
    *
-   * So the aggregate always returned 0 for totalInvested.
-   *
-   * FIX:
-   * ────
-   * • totalDeposited  → aggregate completed 'deposit' transactions  ✓ (correct source)
-   * • totalWithdrawn  → aggregate completed 'withdrawal' transactions ✓ (correct source)
-   * • totalInvested   → read user.totalInvested (maintained by InvestmentsService) ✓
-   * • totalProfit     → read user.totalProfit   (maintained by InvestmentsService) ✓
+   * The deposited / withdrawn adjustments are stored as offsets, so real
+   * deposits and withdrawals made after an admin edit keep counting up.
    */
   async getSummary(userId: string) {
-    const [depositsResult, withdrawalsResult, user] = await Promise.all([
-      // Deposits: real transaction records exist for these
-      this.transactionModel.aggregate([
-        {
-          $match: {
-            user: new Types.ObjectId(userId),
-            type: 'deposit',
-            status: 'completed',
-          },
-        },
-        { $group: { _id: null, total: { $sum: '$amount' } } },
-      ]),
-
-      // Withdrawals: real transaction records exist for these
-      this.transactionModel.aggregate([
-        {
-          $match: {
-            user: new Types.ObjectId(userId),
-            type: 'withdrawal',
-            status: 'completed',
-          },
-        },
-        { $group: { _id: null, total: { $sum: '$amount' } } },
-      ]),
-
-      // User document carries the running totals for invested & profit
-      // because InvestmentsService updates them directly on save().
-      this.userModel.findById(userId).select('totalInvested totalProfit').lean(),
+    const [deposited, withdrawn, user] = await Promise.all([
+      this.sumCompleted(userId, 'deposit'),
+      this.sumCompleted(userId, 'withdrawal'),
+      this.userModel
+        .findById(userId)
+        .select('totalInvested totalProfit depositedAdjustment withdrawnAdjustment')
+        .lean(),
     ]);
 
     return {
-      totalDeposited: depositsResult[0]?.total ?? 0,
-      totalWithdrawn: withdrawalsResult[0]?.total ?? 0,
-      totalInvested:  user?.totalInvested ?? 0,
-      totalProfit:    user?.totalProfit   ?? 0,
+      totalDeposited: Math.max(0, deposited + (user?.depositedAdjustment ?? 0)),
+      totalWithdrawn: Math.max(0, withdrawn + (user?.withdrawnAdjustment ?? 0)),
+      totalInvested: user?.totalInvested ?? 0,
+      totalProfit: user?.totalProfit ?? 0,
     };
+  }
+
+  /**
+   * Admin: set any of a user's dashboard totals to an exact value.
+   * Returns the resulting summary, which is exactly what the user sees.
+   */
+  async setUserTotals(userId: string, adminId: string, dto: UpdateUserTotalsDto) {
+    const { totalDeposited, totalWithdrawn, totalInvested, totalProfit, reason } = dto;
+
+    if ([totalDeposited, totalWithdrawn, totalInvested, totalProfit].every((v) => v === undefined)) {
+      throw new BadRequestException('Provide at least one total to update');
+    }
+
+    const user = await this.userModel.findById(userId);
+    if (!user) throw new NotFoundException('User not found');
+
+    if (totalInvested !== undefined) user.totalInvested = totalInvested;
+    if (totalProfit !== undefined) user.totalProfit = totalProfit;
+
+    if (totalDeposited !== undefined) {
+      const real = await this.sumCompleted(userId, 'deposit');
+      user.depositedAdjustment = totalDeposited - real;
+    }
+    if (totalWithdrawn !== undefined) {
+      const real = await this.sumCompleted(userId, 'withdrawal');
+      user.withdrawnAdjustment = totalWithdrawn - real;
+    }
+
+    await user.save();
+
+    this.logger.log(
+      `Admin ${adminId} edited totals for user ${userId}: ${JSON.stringify({
+        totalDeposited,
+        totalWithdrawn,
+        totalInvested,
+        totalProfit,
+      })} — reason: ${reason}`,
+    );
+
+    return this.getSummary(userId);
   }
 }
